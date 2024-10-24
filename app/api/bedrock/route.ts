@@ -1,87 +1,78 @@
 // app/api/bedrock/route.ts
 
-import { NextRequest, NextResponse } from "next/server";
-import bedrockClient from "@/lib/bedrockClient";
-import { InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import { NextResponse } from 'next/server';
+import {
+  BedrockClient,
+  InvokeAgentCommand,
+} from '@aws-sdk/client-bedrock';
 
-function createCustomPrompt(userMessage: string): string {
-  return `You are a seasoned data scientist specializing in Valorant team formation.
+// Helper function to read the response body stream
+async function streamToString(stream: any): Promise<string> {
+  const chunks = [];
+  const reader = stream.getReader();
+  let done = false;
 
-Instructions: Based on the user's request, generate an optimal team composition for Valorant, including player details such as player name, actual name, current team, role, characters, and key contributions. Return the data in JSON format with the following structure:
+  while (!done) {
+    const { value, done: doneReading } = await reader.read();
+    if (value) {
+      chunks.push(value);
+    }
+    done = doneReading;
+  }
 
-{
-  "playerData": [
-    {
-      "ign": "string",
-      "name": "string",
-      "team": "string",
-      "role": "string",
-      "agents": ["string", "string"],
-      "metrics": {
-        "impact": number,
-        "flexibility": number,
-        "consistency": number
-      },
-      "image": "string" // URL to player image
-    },
-    // ... up to 5 players
-  ],
-  "additionalOutput": "string"
+  const decoder = new TextDecoder('utf-8');
+  const decoded = chunks.map((chunk) => decoder.decode(chunk));
+  return decoded.join('');
 }
 
-User Request:
-"${userMessage}"
-
-Response:`;
-}
-
-export async function POST(req: NextRequest) {
+export const POST = async (request: Request) => {
   try {
-    const body = await req.json();
-    const { userMessage } = body;
+    const formData = await request.formData();
+    const userMessage = formData.get('userMessage');
 
     if (!userMessage) {
-      return NextResponse.json(
-        { error: "User message is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No user message provided' }, { status: 400 });
     }
 
-    const prompt = createCustomPrompt(userMessage);
-
-    const command = new InvokeModelCommand({
-      modelId: "amazon.titan-text-express-v1",
-      contentType: "application/json",
-      accept: "application/json",
-      body: JSON.stringify({
-        inputText: prompt,
-      }),
+    // Set up AWS Bedrock client
+    const client = new BedrockClient({
+      region: process.env.AWS_REGION,
+      // Credentials are automatically picked up from environment variables or config files
+      // Ensure AWS credentials are configured correctly
     });
 
-    const response = await bedrockClient.send(command);
+    // The agentId of your custom agent on Bedrock
+    const agentId = process.env.BEDROCK_AGENT_ID;
 
-    let responseString = "";
-    for await (const chunk of response.body) {
-      responseString += new TextDecoder("utf-8").decode(
-        new Uint8Array([chunk])
-      );
+    if (!agentId) {
+      return NextResponse.json({ error: 'BEDROCK_AGENT_ID is not set' }, { status: 500 });
     }
 
-    // Parse and validate the response
-    let parsedResponse;
-    try {
-      parsedResponse = JSON.parse(responseString);
-    } catch (error) {
-      console.error("Error parsing response:", error);
-      return NextResponse.json(
-        { error: "Failed to parse model response" },
-        { status: 500 }
-      );
-    }
+    // Prepare the input for InvokeAgentCommand
+    const params = {
+      agentId: agentId, // Your custom agent's ID or ARN
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        inputText: userMessage,
+      }),
+    };
 
-    return NextResponse.json({ result: parsedResponse }, { status: 200 });
+    const command = new InvokeAgentCommand(params);
+
+    const response = await client.send(command);
+
+    // Read and parse the response body
+    const responseBody = await response.body.text();
+
+    const data = JSON.parse(responseBody);
+
+    return NextResponse.json({ result: data });
   } catch (error: any) {
-    console.error("Error invoking model:", error);
-    return NextResponse.json({ error: error.toString() }, { status: 500 });
+    console.error('Error:', error);
+    return NextResponse.json(
+      { error: error.message || 'An error occurred while processing the request' },
+      { status: 500 }
+    );
   }
-}
+};

@@ -1,5 +1,3 @@
-// components/player-card.tsx
-
 "use client";
 
 import { Card } from '@/components/ui/card';
@@ -8,7 +6,19 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 
 interface PlayerCardProps {
-  player: any;
+  player: {
+    ign: string;
+    name: string;
+    team: string;
+    role: string;
+    agents: string[];
+    metrics: {
+      impact: number;
+      flexibility: number;
+      consistency: number;
+    };
+    image: string;
+  };
   delay?: number;
 }
 
@@ -63,7 +73,7 @@ export default function PlayerCard({ player, delay = 0 }: PlayerCardProps) {
       <div className="mt-3">
         <p className="text-xs font-medium mb-1">Agent Pool</p>
         <div className="flex flex-wrap gap-1">
-          {player.agents && player.agents.map((agent: string) => (
+          {player.agents && player.agents.map((agent) => (
             <Badge key={agent} variant="secondary" className="text-xs">
               {agent}
             </Badge>
